@@ -1,0 +1,73 @@
+{
+	"info": {
+		"name": "BarrioDigital - Kafka Admin (EP3)",
+		"description": "Coleccion lista para la demo EP6: listar/describir topicos, consumer groups, configuracion y topico temporal.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{ "key": "baseUrl", "value": "http://13.223.237.146:8086" }
+	],
+	"item": [
+		{
+			"name": "Topicos",
+			"item": [
+				{
+					"name": "GET listar topicos",
+					"request": { "method": "GET", "url": "{{baseUrl}}/api/kafka/topics" }
+				},
+				{
+					"name": "GET describir tramites-eventos",
+					"request": { "method": "GET", "url": "{{baseUrl}}/api/kafka/topics/tramites-eventos" }
+				},
+				{
+					"name": "GET describir tramites-auditoria",
+					"request": { "method": "GET", "url": "{{baseUrl}}/api/kafka/topics/tramites-auditoria" }
+				},
+				{
+					"name": "PUT ver config retention/cleanup (tramites-eventos)",
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"url": "{{baseUrl}}/api/kafka/topics/tramites-eventos/config",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"retention.ms\": \"604800000\",\n  \"cleanup.policy\": \"delete\"\n}"
+						}
+					}
+				},
+				{
+					"name": "POST crear topico temporal de prueba",
+					"request": {
+						"method": "POST",
+						"url": "{{baseUrl}}/api/kafka/topics?topicName=topico-demo-temporal&partitions=1&replicationFactor=1"
+					}
+				},
+				{
+					"name": "GET describir topico temporal",
+					"request": { "method": "GET", "url": "{{baseUrl}}/api/kafka/topics/topico-demo-temporal" }
+				},
+				{
+					"name": "DELETE eliminar topico temporal",
+					"request": { "method": "DELETE", "url": "{{baseUrl}}/api/kafka/topics/topico-demo-temporal" }
+				}
+			]
+		},
+		{
+			"name": "Consumer Groups",
+			"item": [
+				{
+					"name": "GET listar consumer groups",
+					"request": { "method": "GET", "url": "{{baseUrl}}/api/kafka/consumer-groups" }
+				},
+				{
+					"name": "GET describir kafkaconsumer-eventos-group (offsets/lag)",
+					"request": { "method": "GET", "url": "{{baseUrl}}/api/kafka/consumer-groups/kafkaconsumer-eventos-group" }
+				},
+				{
+					"name": "GET describir kafkaconsumer-auditoria-group (offsets/lag)",
+					"request": { "method": "GET", "url": "{{baseUrl}}/api/kafka/consumer-groups/kafkaconsumer-auditoria-group" }
+				}
+			]
+		}
+	]
+}
