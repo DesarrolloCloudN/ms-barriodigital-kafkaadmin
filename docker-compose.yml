@@ -1,0 +1,360 @@
+name: barriodigital
+
+services:
+  rabbitmq-1:
+    image: rabbitmq:3.13-management
+    hostname: rabbitmq-1
+    container_name: rabbitmq-1
+    restart: unless-stopped
+    environment:
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-barriodigital-cookie}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-barriodigital}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-barriodigital}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq1-data:/var/lib/rabbitmq
+    networks: [barriodigital-net]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+
+  rabbitmq-2:
+    image: rabbitmq:3.13-management
+    hostname: rabbitmq-2
+    container_name: rabbitmq-2
+    restart: unless-stopped
+    environment:
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-barriodigital-cookie}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-barriodigital}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-barriodigital}
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    volumes:
+      - rabbitmq2-data:/var/lib/rabbitmq
+    networks: [barriodigital-net]
+    depends_on:
+      rabbitmq-1:
+        condition: service_healthy
+    entrypoint: >
+      bash -c "
+      ( sleep 15 &&
+        rabbitmqctl stop_app &&
+        rabbitmqctl join_cluster rabbit@rabbitmq-1 &&
+        rabbitmqctl start_app &&
+        echo 'rabbitmq-2 unido al cluster de rabbitmq-1' ) &
+      exec docker-entrypoint.sh rabbitmq-server
+      "
+
+  ms-barriodigital-requests:
+    build: ./ms-barriodigital-requests
+    container_name: ms-barriodigital-requests
+    restart: unless-stopped
+    environment:
+      ORACLE_DB_URL: "jdbc:oracle:thin:@barriodigital_medium?TNS_ADMIN=/opt/oracle/wallet"
+      ORACLE_DB_USER: ${ORACLE_DB_USER}
+      ORACLE_DB_PASSWORD: ${ORACLE_DB_PASSWORD}
+      RABBITMQ_ADDRESSES: rabbitmq-1:5672,rabbitmq-2:5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-barriodigital}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-barriodigital}
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    volumes:
+      - ./wallet/extracted:/opt/oracle/wallet:ro
+    ports:
+      - "8081:8081"
+    networks: [barriodigital-net]
+    depends_on:
+      rabbitmq-1:
+        condition: service_healthy
+
+  ms-barriodigital-catalog:
+    build: ./ms-barriodigital-catalog
+    container_name: ms-barriodigital-catalog
+    restart: unless-stopped
+    environment:
+      ORACLE_DB_URL: "jdbc:oracle:thin:@barriodigital_medium?TNS_ADMIN=/opt/oracle/wallet"
+      ORACLE_DB_USER: ${ORACLE_DB_USER}
+      ORACLE_DB_PASSWORD: ${ORACLE_DB_PASSWORD}
+      JAVA_TOOL_OPTIONS: "-Xmx192m"
+    volumes:
+      - ./wallet/extracted:/opt/oracle/wallet:ro
+    ports:
+      - "8082:8082"
+    networks: [barriodigital-net]
+
+  ms-barriodigital-notify:
+    build: ./ms-barriodigital-notify
+    container_name: ms-barriodigital-notify
+    restart: unless-stopped
+    environment:
+      RABBITMQ_ADDRESSES: rabbitmq-1:5672,rabbitmq-2:5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-barriodigital}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-barriodigital}
+      JAVA_TOOL_OPTIONS: "-Xmx192m"
+    ports:
+      - "8083:8083"
+    networks: [barriodigital-net]
+    depends_on:
+      rabbitmq-1:
+        condition: service_healthy
+
+  ms-barriodigital-rabbitadmin:
+    build: ./ms-barriodigital-rabbitadmin
+    container_name: ms-barriodigital-rabbitadmin
+    restart: unless-stopped
+    environment:
+      RABBITMQ_ADDRESSES: rabbitmq-1:5672,rabbitmq-2:5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-barriodigital}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-barriodigital}
+      JAVA_TOOL_OPTIONS: "-Xmx192m"
+    ports:
+      - "8084:8084"
+    networks: [barriodigital-net]
+    depends_on:
+      rabbitmq-1:
+        condition: service_healthy
+
+  ms-barriodigital-kafkaconsumer:
+    build: ./ms-barriodigital-kafkaconsumer
+    container_name: ms-barriodigital-kafkaconsumer
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      JAVA_TOOL_OPTIONS: "-Xmx192m"
+    ports:
+      - "8087:8087"
+    networks: [barriodigital-net]
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+
+  ms-barriodigital-kafkaadmin:
+    build: ./ms-barriodigital-kafkaadmin
+    container_name: ms-barriodigital-kafkaadmin
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      JAVA_TOOL_OPTIONS: "-Xmx192m"
+    ports:
+      - "8086:8086"
+    networks: [barriodigital-net]
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+
+  ms-barriodigital-bff:
+    build: ./ms-barriodigital-bff
+    container_name: ms-barriodigital-bff
+    restart: unless-stopped
+    environment:
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID}
+      AZURE_BFF_CLIENT_ID: ${AZURE_BFF_CLIENT_ID}
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:4200}
+      SERVICES_REQUESTS_URL: http://ms-barriodigital-requests:8081
+      SERVICES_CATALOG_URL: http://ms-barriodigital-catalog:8082
+      JAVA_TOOL_OPTIONS: "-Xmx192m"
+    ports:
+      - "8080:8080"
+    networks: [barriodigital-net]
+    depends_on:
+      - ms-barriodigital-requests
+      - ms-barriodigital-catalog
+
+  frontend-barriodigital:
+    build: ./frontend-barriodigital
+    container_name: frontend-barriodigital
+    restart: unless-stopped
+    networks: [barriodigital-net]
+
+  zookeeper-1:
+    image: confluentinc/cp-zookeeper:7.6.1
+    hostname: zookeeper-1
+    container_name: zookeeper-1
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_SERVER_ID: 1
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
+    ports:
+      - "2181:2181"
+    volumes:
+      - zk1-data:/var/lib/zookeeper/data
+      - zk1-log:/var/lib/zookeeper/log
+    networks: [barriodigital-net]
+
+  zookeeper-2:
+    image: confluentinc/cp-zookeeper:7.6.1
+    hostname: zookeeper-2
+    container_name: zookeeper-2
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_SERVER_ID: 2
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
+    ports:
+      - "2182:2181"
+    volumes:
+      - zk2-data:/var/lib/zookeeper/data
+      - zk2-log:/var/lib/zookeeper/log
+    networks: [barriodigital-net]
+
+  zookeeper-3:
+    image: confluentinc/cp-zookeeper:7.6.1
+    hostname: zookeeper-3
+    container_name: zookeeper-3
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_SERVER_ID: 3
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
+    ports:
+      - "2183:2181"
+    volumes:
+      - zk3-data:/var/lib/zookeeper/data
+      - zk3-log:/var/lib/zookeeper/log
+    networks: [barriodigital-net]
+
+  kafka-1:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka-1
+    container_name: kafka-1
+    restart: unless-stopped
+    depends_on: [zookeeper-1, zookeeper-2, zookeeper-3]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:9092,EXTERNAL://localhost:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xmx384M -Xms384M"
+    ports:
+      - "29092:29092"
+    volumes:
+      - kafka1-data:/var/lib/kafka/data
+    networks: [barriodigital-net]
+
+  kafka-2:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka-2
+    container_name: kafka-2
+    restart: unless-stopped
+    depends_on: [zookeeper-1, zookeeper-2, zookeeper-3]
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:39092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:9092,EXTERNAL://localhost:39092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xmx384M -Xms384M"
+    ports:
+      - "39092:39092"
+    volumes:
+      - kafka2-data:/var/lib/kafka/data
+    networks: [barriodigital-net]
+
+  kafka-3:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka-3
+    container_name: kafka-3
+    restart: unless-stopped
+    depends_on: [zookeeper-1, zookeeper-2, zookeeper-3]
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:49092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:9092,EXTERNAL://localhost:49092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xmx384M -Xms384M"
+    ports:
+      - "49092:49092"
+    volumes:
+      - kafka3-data:/var/lib/kafka/data
+    networks: [barriodigital-net]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: unless-stopped
+    depends_on: [kafka-1, kafka-2, kafka-3]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: barriodigital
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+      JAVA_OPTS: "-Xmx256m"
+    ports:
+      - "8085:8080"
+    networks: [barriodigital-net]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [barriodigital-net]
+    depends_on:
+      - frontend-barriodigital
+
+networks:
+  barriodigital-net:
+    driver: bridge
+
+volumes:
+  rabbitmq1-data:
+  rabbitmq2-data:
+  caddy-data:
+  caddy-config:
+  zk1-data:
+  zk1-log:
+  zk2-data:
+  zk2-log:
+  zk3-data:
+  zk3-log:
+  kafka1-data:
+  kafka2-data:
+  kafka3-data:
